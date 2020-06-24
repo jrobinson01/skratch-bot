@@ -1,0 +1,20 @@
+{
+  "main": "index.js",
+  "name": "skratch-bot",
+  "version": "0.0.0",
+  "description": "a discord bot to manage scratch session rooms",
+  "author": "jrobinsonmedia@gmail.com",
+  "license": "MIT",
+  "scripts": {
+    "test": "mocha"
+  },
+  "dependencies": {
+    "discord.js": "^12.2.0",
+    "fn-machine": "^0.0.13"
+  },
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "mocha": "^8.0.1",
+    "sinon": "^9.0.2"
+  }
+}
