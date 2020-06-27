@@ -1,81 +1,124 @@
 const EventEmitter = require('events');
+import { machine, state } from 'fn-machine';
 
-const minQueueLength = 1;// set to 1 in production
+const STATES = {
+  EMPTY: 'empty',
+  MANY_USERS: 'many-users',
+};
 
-class SkratchChannel extends EventEmitter {
-  constructor(voiceChannelId, textChannelId, timeLimit = 5) {
-    super();
-    this.vid = voiceChannelId;
-    this.tid = textChannelId;
-    this.queue = [];
-    this.timeLimit = parseFloat(timeLimit);// minutes
-    this.timer = null;
-    this.currentUser = null;
-  }
-
-  kill() {
-    clearTimeout(this.timer);
-    this.timer = null;
-    this.emit('killed', this.vid, this.tid);
-    this.removeAllListeners();
-  }
-
-  joinQueue(userId) {
-    console.log('joinQueue called', userId);
-    if (this.queue.includes(userId)) {
-      // user already in the queue
-      return null;
-    }
-
-    // add the user to the queue
-    this.queue.push(userId);
-    console.log('added user to queue:', userId, this.queue);
-    // if the queue is empty, start the timer
-    if (this.queue.length === 0) {
-      this.startTimer();
-    }    // dispatch an event
-    this.emit('joined', this.vid, userId);
-  }
-
-  startTimer() {
-    clearTimeout(this.timer);
-    const next = this.queue[0];
-    console.log('setting timer', next);
-    this.timer = setTimeout(() => this.nextUser(), this.timeLimit * 60 * 1000);
-    // dispatch an event
-    this.emit('timerStarted', this.vid, this.timeLimit, next);
-  }
-
-  nextUser() {
-    // if there's only one user in the queue, let them continue until there is a new user added.
-    // if a new user is added, and a timer is not already running, start the timer.
-    console.log('nextUser called', this.queue);
-    // get the next user from the queue
-    const next = this.queue.shift();
-
-    // if there is a next user set the currentUser
-    if (next) {
-      this.currentUser = next;
-      // dispatch event with previous and next user
-      this.emit('nextUser', this.vid, next, this.currentUser);
-    }
-    // if there is still a queue, set the timer
-    if (this.queue.length > 0) {
-      console.log('restarting timer', this.queue);
-      this.startTimer();
-    } else {
-      this.emit('queueEmpty', this.vid, this.queue, this.currentUser);
-    }
-  }
-
-  forfeitUser(userId) {
-    if (this.queue.includes(userId)) {
-      this.queue = this.queue.filter(u => u !== userId);
-      clearTimeout(this.timer);
-      this.nextUser();
-      this.emit('forfeitedUser', this.vid, userId);
-    }
-  }
+const EVENTS = {
+  USER_SWITCH: 'user-switch',
 }
 
-module.exports = SkratchChannel;
+
+class SkratchChannel extends EventEmitter {
+
+  constructor(vid, tid, timeout = 5) {
+    super();
+    this.vid = vid;
+    this.tid = tid;
+    this.timeout = parseFloat(timeout);
+    this.context = {
+      queue: [],
+    };
+    this.initMachine();
+    // start timer
+    this.resume();
+  }
+
+  initMachine() {
+    this.machine = machine([
+      state(STATES.EMPTY, {
+        addUser(detail, context) {
+          const queue = context.queue.concat([detail.userId]);
+          return {
+            state: STATES.MANY_USERS,
+            context: { ...context, ...{ queue } }
+          }
+        }
+      }),
+      state(STATES.MANY_USERS, {
+        addUser(detail, context) {
+          const queue = context.queue.concat([detail.userId]);
+          return {
+            state: STATES.MANY_USERS,
+            context: { ...context, ...{ queue } }
+          }
+        },
+        removeUser(detail, context) {
+          const queue = context.queue.filter(u => u !== detail.userId);
+          const newContext = { ...context, ...{ queue } };
+          if (queue.length === 0) {
+            return {
+              state: STATES.EMPTY,
+              context: newContext,
+            }
+          }
+          return {
+            state: STATES.MANY_USERS,
+            context: newContext,
+          }
+        },
+        timerFired(detail, context) {
+          // when the timer fires, 
+          // remove the first user from the queue.
+          // advance to the empty, one-user or many-users state
+          const queue = context.queue.slice(1);
+          const newContext = { ...context, ...{ queue } };
+          if (queue.length === 0) {
+            return {
+              state: STATES.EMPTY,
+              context: newContext,
+            }
+          }
+          return {
+            state: STATES.MANY_USERS,
+            context: { ...newContext, ...{ event: EVENTS.USER_SWITCH } },
+          }
+        }
+      }, (context) => {
+        return { ...context, ...{ event: undefined } };
+      }),
+    ], STATES.EMPTY, this.context, (newState) => {
+      this.context = newState.context;
+      this.currentState = newState.state;
+      this.emit('state-change', this.currentState, this.context);
+      if (this.context.event) {
+        this.emit(this.context.event, this.context.queue);
+      }
+    });
+  }
+
+  addUser(userId) {
+    if (userId) {
+      this.machine('addUser', { userId });
+    }
+  }
+
+  removeUser(userId) {
+    if (userId) {
+      this.machine('removeUser', { userId });
+    }
+  }
+
+  pause() {
+    clearInterval(this.timer);
+  }
+
+  resume() {
+    // set timer
+    clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      this.machine('timerFired');
+    }, this.timeout * 60 * 1000);
+  }
+
+  setTimer(timeout) {
+    this.timeout = parseFloat(timeout);
+    this.resume();
+  }
+
+}
+
+module.exports.SkratchChannel = SkratchChannel;
+module.exports.STATES = STATES;

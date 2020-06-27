@@ -6,10 +6,11 @@
   "author": "jrobinsonmedia@gmail.com",
   "license": "MIT",
   "scripts": {
-    "test": "mocha"
+    "test": "mocha -r esm"
   },
   "dependencies": {
     "discord.js": "^12.2.0",
+    "esm": "^3.2.25",
     "fn-machine": "^0.0.13"
   },
   "devDependencies": {
